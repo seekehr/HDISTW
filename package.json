@@ -1,0 +1,36 @@
+{
+  "name": "howdoiscrapethiswebsite",
+  "version": "0.1.0",
+  "description": "Local web recon tool that figures out how a website loads its data and how to scrape it efficiently.",
+  "type": "module",
+  "bin": {
+    "hdistw": "dist/cli/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "setup:browser": "playwright install chromium"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google/genai": "^2.24.0",
+    "commander": "^15.0.0",
+    "playwright": "^1.63.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}
