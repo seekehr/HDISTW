@@ -43,11 +43,11 @@ export function analyzeNextjs(ctx: AnalysisContext): NextjsFinding {
     .map((r) => {
       const body = jsonBody(r)?.value;
       const pageProps = isPlainObject(body) && isPlainObject(body.pageProps) ? body.pageProps : body;
-      return { url: r.url, phase: r.phase, status: r.status, assessment: assessPayload(pageProps, ctx.visible) };
+      return { url: r.url, status: r.status, assessment: assessPayload(pageProps, ctx.visible) };
     });
   if (dataRequests.length) signals.push(`${dataRequests.length} /_next/data request(s)`);
 
-  const rscRequests = capture.requests.filter(isRscRequest).map((r) => ({ url: r.url, phase: r.phase }));
+  const rscRequests = capture.requests.filter(isRscRequest).map((r) => ({ url: r.url }));
   if (rscRequests.length) signals.push(`${rscRequests.length} RSC request(s)`);
 
   const detected = signals.length > 0;

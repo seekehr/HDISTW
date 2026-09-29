@@ -128,11 +128,27 @@ export async function startFixtureServer(): Promise<{ url: string; server: Serve
         }));
       case "/embedded":
         return html(EMBEDDED);
+      case "/guarded":
+        // Stand-in for a bot check: a 403 page until a human clicks the button (which sets a cookie).
+        if (!/passed=1/.test(req.headers.cookie ?? ""))
+          return send(
+            403,
+            "text/html",
+            layout(`<h1>Just a moment...</h1><button id="pass" onclick="document.cookie='passed=1';location.reload()">Verify</button>`),
+            { "cf-mitigated": "challenge" },
+          );
+        return html(SPA);
       case "/account":
+        if (/session=1/.test(req.headers.cookie ?? "")) return html(SPA);
         res.writeHead(302, { location: "/login?next=/account" });
         return res.end();
       case "/login":
-        return html(layout(`<form><input name="email"><input type="password" name="password"><button>Sign in</button></form>`));
+        // "Signing in" just sets a persistent cookie, like a real login would.
+        return html(
+          layout(
+            `<form onsubmit="event.preventDefault();document.cookie='session=1; max-age=3600; path=/';location='/account'"><input name="email"><input type="password" name="password"><button id="signin">Sign in</button></form>`,
+          ),
+        );
       default:
         return send(404, "text/plain", "not found");
     }

@@ -106,6 +106,18 @@ function candidateStrings(value: unknown, out: string[], depth = 0, limit = 40):
   }
 }
 
+/**
+ * Prefers the record set the user can actually see: payloads like __NEXT_DATA__
+ * often hold large config arrays next to the small list that is on screen.
+ */
+function pickRecordSet(sets: FoundRecordSet[], visible: VisibleText): FoundRecordSet | undefined {
+  if (visible.isEmpty || sets.length < 2) return sets[0];
+  return sets
+    .slice(0, 15)
+    .map((set) => ({ set, rank: set.weight * (0.1 + recordOverlap(set.items, visible)) }))
+    .sort((a, b) => b.rank - a.rank)[0]?.set;
+}
+
 /** Fraction of sampled records with at least one string visible on the page. */
 export function recordOverlap(items: Record<string, unknown>[], visible: VisibleText): number {
   if (visible.isEmpty) return 0;
@@ -136,8 +148,7 @@ function scalarOverlap(value: unknown, visible: VisibleText): number {
 export function assessPayload(value: unknown, visible: VisibleText): PayloadAssessment {
   const reasons: string[] = [];
   let score = 0;
-  const sets = findRecordSets(value);
-  const best = sets[0];
+  const best = pickRecordSet(findRecordSets(value), visible);
   let visibleOverlap = 0;
 
   if (best) {

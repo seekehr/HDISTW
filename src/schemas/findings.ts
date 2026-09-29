@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { PhaseSchema } from "./capture.js";
 
 export const RecordSetSchema = z.object({
   /** Dotted path to the array inside the payload, e.g. `data.products` or `edges[].node`. */
@@ -38,7 +37,6 @@ export const RestCandidateSchema = z.object({
   endpointKey: z.string(),
   score: z.number(),
   reasons: z.array(z.string()),
-  phase: PhaseSchema,
   status: z.number().optional(),
   occurrences: z.number().int(),
   sentCookies: z.boolean(),
@@ -60,7 +58,6 @@ export const GraphQLOperationSchema = z.object({
   variables: z.record(z.string(), z.unknown()).optional(),
   entityType: z.string().optional(),
   paginationFields: z.array(z.string()),
-  phase: PhaseSchema,
   status: z.number().optional(),
   occurrences: z.number().int(),
   sentCookies: z.boolean(),
@@ -87,11 +84,11 @@ export const NextjsFindingSchema = z.object({
     .optional(),
   /** `/_next/data/...json` requests actually observed. */
   dataRequests: z.array(
-    z.object({ url: z.string(), phase: PhaseSchema, status: z.number().optional(), assessment: PayloadAssessmentSchema }),
+    z.object({ url: z.string(), status: z.number().optional(), assessment: PayloadAssessmentSchema }),
   ),
   /** Conventional `/_next/data` URL derived from the build ID. Not observed, not verified. */
   derivedDataUrl: z.string().optional(),
-  rscRequests: z.array(z.object({ url: z.string(), phase: PhaseSchema })),
+  rscRequests: z.array(z.object({ url: z.string() })),
   flightDataInHtml: z.boolean(),
 });
 export type NextjsFinding = z.infer<typeof NextjsFindingSchema>;
@@ -117,7 +114,6 @@ export const RenderingTypeSchema = z.enum([
   "hybrid",
   "API-driven",
   "embedded-state-driven",
-  "interaction-dependent",
 ]);
 export type RenderingType = z.infer<typeof RenderingTypeSchema>;
 
@@ -142,7 +138,7 @@ export const AuthFindingSchema = z.object({
   loginRedirect: z.string().optional(),
   loginFormDetected: z.boolean(),
   botProtection: z.array(z.string()),
-  authRequired: z.enum(["no", "likely", "yes"]),
+  authRequired: z.enum(["no", "likely", "yes", "unknown"]),
   browserNeededForLogin: z.enum(["yes", "no", "unknown"]),
   browserNeededAfterLogin: z.enum(["yes", "probably not", "no", "unknown"]),
   notes: z.array(z.string()),

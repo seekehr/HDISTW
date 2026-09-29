@@ -9,7 +9,7 @@ describe("pagination detection", () => {
   it("detects cursor pagination from request param and response field", () => {
     const [p] = run([
       jsonReq("https://shop.test/api/items", { items: PRODUCTS, meta: { nextCursor: "abc" } }),
-      jsonReq("https://shop.test/api/items?cursor=abc", { items: PRODUCTS, meta: { nextCursor: "def" } }, { phase: "interaction" }),
+      jsonReq("https://shop.test/api/items?cursor=abc", { items: PRODUCTS, meta: { nextCursor: "def" } }),
     ]);
     expect(p).toMatchObject({
       source: "rest",
@@ -18,7 +18,6 @@ describe("pagination detection", () => {
       responseFields: ["meta.nextCursor"],
       confirmed: false, // only one cursor value observed
     });
-    expect(p?.evidence.join(" ")).toMatch(/triggered by interaction/);
   });
 
   it("detects cursor pagination from the response alone", () => {

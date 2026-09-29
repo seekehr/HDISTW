@@ -54,10 +54,10 @@ export function collectUncertainties(capture: Capture, f: Findings, strategies: 
   const out: string[] = [];
   const top = strategies[0];
   const topPagination = top ? paginationFor(f, top) : undefined;
-  if (!capture.interactive && !topPagination)
-    out.push("No pagination was observed for the recommended source. Run with --interactive and page, scroll or filter to reveal it.");
-  if (f.auth.authRequired !== "no" && !f.rest.length && !f.graphql.length)
-    out.push("The page requires login. Run with --interactive, log in in the browser window, then browse to discover the data requests.");
+  if (!topPagination)
+    out.push("No pagination was observed for the recommended source. Only the page load is recorded, so requests made when scrolling or clicking 'next' are not seen.");
+  if ((f.auth.authRequired === "yes" || f.auth.authRequired === "likely") && !capture.usedLoginWindow)
+    out.push("The page seems to need a login. Run hdistw in a terminal so it can open a login window, or pass --login.");
   if (topPagination && !topPagination.confirmed)
     out.push("Pagination was inferred from parameter/field names, not confirmed by several requests.");
   if (f.nextjs.derivedDataUrl)
@@ -73,7 +73,7 @@ export function collectUncertainties(capture: Capture, f: Findings, strategies: 
   if (f.auth.botProtection.length)
     out.push(`Bot protection detected (${f.auth.botProtection.join(", ")}). Results may differ from a normal visit.`);
   if (capture.renderedText.trim().split(/\s+/).length < 20)
-    out.push("Very little visible text was captured; the page may need interaction or login, or it may have blocked the browser.");
+    out.push("Very little visible text was captured; the page may need a login, or it may have blocked the browser.");
   if (!f.rest.length && !f.graphql.length && !f.embeddedState.some((e) => e.parseable) && !f.nextjs.nextData)
     out.push("No structured data source (API, GraphQL, embedded JSON) was observed.");
   for (const e of capture.errors) out.push(`Capture: ${e}`);
@@ -149,6 +149,27 @@ export function buildRecommendation(capture: Capture, f: Findings, strategies: R
     statePreserve: statePreserve(f, top),
     avoid: avoid(f, top),
     uncertainties: collectUncertainties(capture, f, strategies),
+    generatedBy: "deterministic",
+  };
+}
+
+/** Used when the captured page was a bot check: no strategy, just what to do next. */
+export function blockedRecommendation(capture: Capture, reason: string): Recommendation {
+  return {
+    strategy: null,
+    source: "none observed",
+    why: `${reason} The real page was never loaded, so there is no recommendation.`,
+    browserRequired: "yes",
+    browserOnlyForAuth: false,
+    pagination: "Unknown: the page was not observed.",
+    statePreserve: [],
+    avoid: ["Trying to bypass the bot check. hdistw will not do this, and it usually breaks the site's terms."],
+    uncertainties: [
+      capture.usedLoginWindow
+        ? "The page still showed a bot check after the login window. Try again, or check the site in your normal browser."
+        : "Run hdistw in a terminal so it can open a browser window where you pass the check yourself, or pass --login.",
+      ...capture.errors.map((e) => `Capture: ${e}`),
+    ],
     generatedBy: "deterministic",
   };
 }

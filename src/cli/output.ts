@@ -31,13 +31,32 @@ export function renderSummary(r: Report, markdownPath: string): string {
   const f = r.findings;
   const lines: string[] = [];
   const status = r.stats.documentStatus;
+  const rel = path.relative(process.cwd(), markdownPath);
+  const reportPath = rel.startsWith("..") ? markdownPath : `./${rel.replace(/\\/g, "/")}`;
+
+  if (r.outcome === "blocked") {
+    lines.push(
+      fail("Blocked: the site showed a bot check instead of the page"),
+      dim(`  ${r.blockedReason ?? ""}`),
+      "",
+      "Nothing about this site was analyzed, so there is no recommendation.",
+      "",
+      bold("Next:"),
+      ...r.recommendation.uncertainties.filter((u) => !u.startsWith("Capture:")).map((u) => `- ${u}`),
+      "",
+      bold("Report:"),
+      reportPath,
+    );
+    return lines.join("\n");
+  }
+
   if (status && status < 400) lines.push(ok(`Page loaded (${status}, ${(r.stats.durationMs / 1000).toFixed(1)}s)`));
   else lines.push(warn(`Page loaded with status ${status ?? "unknown"}`));
 
   if (f.framework.detected.length) lines.push(ok(`${f.framework.name} detected`));
   lines.push(ok(`Rendering: ${f.rendering.type}`));
   lines.push(ok(`${r.stats.jsonResponses} JSON responses found`));
-  if (r.interactive) lines.push(ok(`${r.stats.interactionRequests} requests triggered by interaction`));
+  if (r.usedLoginWindow) lines.push(ok("Captured with your logged-in browser session"));
 
   const sources = f.rest.filter((c) => c.score >= 50).length + f.graphql.filter((g) => g.score >= 50).length +
     f.embeddedState.filter((e) => e.canReplaceDom).length + (f.nextjs.nextData?.assessment.recordSet ? 1 : 0);
@@ -52,14 +71,13 @@ export function renderSummary(r: Report, markdownPath: string): string {
   if (r.ai.used) lines.push(ok(`Gemini analysis (${r.ai.model})`));
   else if (r.ai.note) lines.push(dim(`- ${r.ai.note}`));
 
-  const rel = path.relative(process.cwd(), markdownPath);
   lines.push(
     "",
     bold("Best source:"),
     cyan(r.recommendation.source),
     "",
     bold("Recommended:"),
-    RECOMMENDED[r.recommendation.strategy] ?? r.recommendation.strategy,
+    (r.recommendation.strategy && RECOMMENDED[r.recommendation.strategy]) || "none",
     "",
     bold("Browser required:"),
     BROWSER[r.recommendation.browserRequired],
@@ -68,7 +86,7 @@ export function renderSummary(r: Report, markdownPath: string): string {
     ...r.strategies.slice(0, 4).map((s, i) => `${i + 1}. ${s.label.padEnd(30)} ${String(s.score).padStart(3)}`),
     "",
     bold("Report:"),
-    rel.startsWith("..") ? markdownPath : `./${rel.replace(/\\/g, "/")}`,
+    reportPath,
   );
   return lines.join("\n");
 }

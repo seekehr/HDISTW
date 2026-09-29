@@ -6,7 +6,6 @@ export function req(partial: Partial<CapturedRequest> & { url: string }): Captur
   const body = partial.bodyText;
   return {
     id: nextId++,
-    phase: "initial",
     method: "GET",
     resourceType: "fetch",
     requestHeaders: {},
@@ -29,12 +28,11 @@ export function capture(partial: Partial<Capture> = {}): Capture {
     finalUrl: "https://shop.test/products",
     startedAt: new Date(0).toISOString(),
     durationMs: 1000,
-    interactive: false,
+    usedLoginWindow: false,
     document: { status: 200, headers: {}, redirectChain: [] },
     initialHtml: "<html><body></body></html>",
     renderedHtml: "<html><body></body></html>",
     renderedText: "",
-    interactionText: "",
     dom: { title: "Shop", hasPasswordField: false, paginationLinks: [], hasLoadMoreButton: false },
     requests: [],
     ignored: { total: 0, byReason: {} },

@@ -58,7 +58,6 @@ export function analyzeRest(ctx: AnalysisContext): RestCandidate[] {
       endpointKey: key,
       score: scored.score,
       reasons: scored.reasons,
-      phase: existing?.phase === "initial" ? "initial" : req.phase,
       status: req.status,
       occurrences: (existing?.occurrences ?? 0) + 1,
       sentCookies: sentCookies(req) || (existing?.sentCookies ?? false),
@@ -67,7 +66,7 @@ export function analyzeRest(ctx: AnalysisContext): RestCandidate[] {
       assessment: scored.assessment,
     };
     if (!existing || candidate.score > existing.score) byKey.set(key, candidate);
-    else byKey.set(key, { ...existing, occurrences: candidate.occurrences, phase: candidate.phase });
+    else byKey.set(key, { ...existing, occurrences: candidate.occurrences });
   }
   return [...byKey.values()]
     .filter((c) => c.score >= MIN_REST_SCORE)

@@ -3,3 +3,4 @@ dist/
 reports/
 .env
 *.log
+.hdistw-profile/

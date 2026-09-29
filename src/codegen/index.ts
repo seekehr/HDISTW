@@ -84,7 +84,7 @@ for (let ${pageParam ? "page" : "offset"} = ${start}; ; ${pageParam ? "page" : "
 }`;
   }
   const nextHint = cursorField
-    ? `\n// Next page: ${accessor("data", cursorField)}. The request parameter that takes it was not observed;\n// run hdistw with --interactive and load the next page to discover it.`
+    ? `\n// Next page: ${accessor("data", cursorField)}. The request parameter that takes it was not observed;\n// load the next page with your browser's DevTools open to see which parameter carries it.`
     : "";
   return `const response = ${fetchCall(JSON.stringify(c.url))};
 if (!response.ok) throw new Error(\`HTTP \${response.status}\`);

@@ -4,7 +4,7 @@ import { htmlToText, VisibleText } from "../utils/text.js";
 export interface AnalysisContext {
   capture: Capture;
   pageUrl: string;
-  /** Everything the user could see: initial render plus interactive browsing. */
+  /** Visible text of the rendered page. */
   visible: VisibleText;
   /** Text of the HTML as served, before JavaScript. */
   initialText: string;
@@ -14,7 +14,7 @@ export function buildContext(capture: Capture): AnalysisContext {
   return {
     capture,
     pageUrl: capture.finalUrl || capture.target,
-    visible: new VisibleText(capture.renderedText, capture.interactionText),
+    visible: new VisibleText(capture.renderedText),
     initialText: htmlToText(capture.initialHtml),
   };
 }

@@ -50,11 +50,10 @@ export function buildSanitizedSummary(
 
   const build = (chars: number) => ({
     target: redactUrl(capture.finalUrl),
-    interactiveSession: capture.interactive,
+    loggedInViaWindow: capture.usedLoginWindow,
     capture: {
       capturedRequests: capture.requests.length,
       jsonResponses: capture.requests.filter((r) => /json/i.test(r.contentType ?? "")).length,
-      interactionRequests: capture.requests.filter((r) => r.phase === "interaction").length,
       documentStatus: capture.document.status,
     },
     framework: f.framework.name,
@@ -65,7 +64,6 @@ export function buildSanitizedSummary(
       url: redactUrl(c.url),
       score: c.score,
       reasons: c.reasons,
-      phase: c.phase,
       status: c.status,
       requestSentCookies: c.sentCookies,
       requestSentAuthorizationHeader: c.sentAuthorization,
@@ -80,7 +78,6 @@ export function buildSanitizedSummary(
       entityType: op.entityType,
       paginationFields: op.paginationFields,
       score: op.score,
-      phase: op.phase,
       requestSentAuthorizationHeader: op.sentAuthorization,
       response: data(op.assessment, chars),
     })),
@@ -92,7 +89,7 @@ export function buildSanitizedSummary(
       nextData: f.nextjs.nextData
         ? { sizeBytes: f.nextjs.nextData.sizeBytes, pagePropsKeys: f.nextjs.nextData.pagePropsKeys, ...data(f.nextjs.nextData.assessment, chars) }
         : null,
-      observedDataRequests: f.nextjs.dataRequests.map((d) => ({ url: redactUrl(d.url), phase: d.phase, ...data(d.assessment, chars) })),
+      observedDataRequests: f.nextjs.dataRequests.map((d) => ({ url: redactUrl(d.url), ...data(d.assessment, chars) })),
       derivedDataUrlNotObserved: f.nextjs.derivedDataUrl ?? null,
       rscRequestCount: f.nextjs.rscRequests.length,
     },

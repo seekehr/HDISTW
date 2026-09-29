@@ -37,7 +37,6 @@ export function rankStrategies(f: Findings): RankedStrategy[] {
   if (bestRest) {
     const reasons = bestRest.reasons.slice(0, 5);
     let score = bestRest.score;
-    if (bestRest.phase === "interaction") reasons.push("only requested after interaction; reproduce its parameters");
     if (authGated) {
       score -= AUTH_PENALTY;
       reasons.push(authReason);
@@ -130,7 +129,7 @@ export function rankStrategies(f: Findings): RankedStrategy[] {
   {
     const bestOther = Math.max(0, ...out.filter((s) => s.id !== "ssr-html").map((s) => s.score));
     const reasons: string[] = [];
-    if (["client-rendered", "interaction-dependent"].includes(rendering.type))
+    if (rendering.type === "client-rendered")
       reasons.push(`page is ${rendering.type}; content appears only after JavaScript`);
     else if (coverage < 0.7) reasons.push(`${Math.round((1 - coverage) * 100)}% of visible text only appears after JavaScript`);
     if (f.auth.authRequired === "yes") reasons.push("page requires login; log in manually in the browser");

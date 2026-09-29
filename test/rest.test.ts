@@ -42,10 +42,9 @@ describe("REST endpoint detection", () => {
   });
 
   it("groups repeated calls to the same endpoint", () => {
-    const p2 = jsonReq("https://shop.test/api/products?page=2", { data: PRODUCTS, meta: { page: 2 } }, { phase: "interaction" });
+    const p2 = jsonReq("https://shop.test/api/products?page=2", { data: PRODUCTS, meta: { page: 2 } });
     const results = analyzeRest(buildContext(capture({ requests: [products, p2], renderedText: VISIBLE_PRODUCTS_TEXT })));
     expect(results).toHaveLength(1);
     expect(results[0]?.occurrences).toBe(2);
-    expect(results[0]?.phase).toBe("initial");
   });
 });

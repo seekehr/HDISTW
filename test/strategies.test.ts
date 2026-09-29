@@ -53,7 +53,7 @@ describe("strategy ranking", () => {
     const cap = capture({
       initialHtml: shell,
       renderedText: VISIBLE_PRODUCTS_TEXT,
-      requests: [products(), jsonReq("https://shop.test/api/products?page=2", { data: PRODUCTS, meta: { nextPage: 3 } }, { phase: "interaction" })],
+      requests: [products(), jsonReq("https://shop.test/api/products?page=2", { data: PRODUCTS, meta: { nextPage: 3 } })],
     });
     const f = analyzeCapture(cap);
     const ranked = rankStrategies(f);
@@ -61,7 +61,7 @@ describe("strategy ranking", () => {
     expect(rec).toMatchObject({ strategy: "rest-api", browserRequired: "no", generatedBy: "deterministic" });
     expect(rec.pagination).toMatch(/^Page-number-based/);
     expect(rec.avoid.join(" ")).toMatch(/DOM scraping/);
-    const code = generateExample(rec.strategy, f, cap.finalUrl, f.pagination[0]);
+    const code = generateExample(rec.strategy!, f, cap.finalUrl, f.pagination[0]);
     expect(code).toContain('url.searchParams.set("page", String(page))');
     expect(code).toContain("const records = data.data;");
   });

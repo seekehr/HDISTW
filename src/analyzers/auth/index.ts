@@ -1,5 +1,6 @@
 import type { AuthFinding, EmbeddedState, GraphQLOperation, RestCandidate } from "../../schemas/findings.js";
 import { shortUrl } from "../../utils/url.js";
+import { challengeSignals, isBlockedPage } from "../blocking.js";
 import type { AnalysisContext } from "../context.js";
 
 const SESSION_COOKIE =
@@ -69,21 +70,24 @@ export function analyzeAuth(
   const allHeaders = [capture.document.headers, ...capture.requests.map((r) => r.responseHeaders)];
   if (allHeaders.some((h) => h["cf-mitigated"] === "challenge")) botProtection.add("Cloudflare challenge");
   if (allHeaders.some((h) => "x-datadome" in h || "x-dd-b" in h)) botProtection.add("DataDome");
-  if (/just a moment|attention required|are you a robot|verify you are human|captcha/i.test(capture.dom.title + " " + capture.renderedText.slice(0, 2000)))
-    botProtection.add("challenge / CAPTCHA page shown");
+  const pageSignals = { status: capture.document.status, title: capture.dom.title, text: capture.renderedText, headers: capture.document.headers };
+  for (const signal of challengeSignals(pageSignals)) botProtection.add(signal);
+  const blocked = isBlockedPage(pageSignals);
 
   const dataSources = [...rest, ...graphql].filter((s) => s.score >= 50);
   const deniedDocument = capture.document.status === 401 || capture.document.status === 403;
   // A 401 from a session probe is normal on public pages; only count it when the page itself is thin.
   const pageHasContent =
     embedded.some((e) => e.canReplaceDom) || capture.renderedText.split(/\s+/).filter(Boolean).length >= 80;
-  const deniedData = deniedResponses.length > 0 && dataSources.length === 0 && !pageHasContent;
+  const deniedData = deniedResponses.length > 0 && dataSources.length === 0 && !pageHasContent && !blocked;
   if (deniedResponses.length && !deniedData && pageHasContent)
     notes.push("Some requests returned 401/403 (e.g. session or account probes), but the page content loaded without logging in.");
   const dataNeedsAuth = dataSources.some((s) => s.sentAuthorization);
 
   let authRequired: AuthFinding["authRequired"] = "no";
-  if (redirectedToLogin || (deniedDocument && !botProtection.size)) authRequired = "yes";
+  // A bot-check page says nothing about whether the real page needs a login.
+  if (blocked) authRequired = "unknown";
+  else if (redirectedToLogin || (deniedDocument && !botProtection.size)) authRequired = "yes";
   else if (deniedData || dataNeedsAuth || (loginFormDetected && dataSources.length === 0 && !embedded.some((e) => e.canReplaceDom)))
     authRequired = "likely";
 
@@ -97,7 +101,10 @@ export function analyzeAuth(
 
   let browserNeededForLogin: AuthFinding["browserNeededForLogin"] = "no";
   let browserNeededAfterLogin: AuthFinding["browserNeededAfterLogin"] = "no";
-  if (authRequired !== "no") {
+  if (authRequired === "unknown") {
+    browserNeededForLogin = "unknown";
+    browserNeededAfterLogin = "unknown";
+  } else if (authRequired !== "no") {
     browserNeededForLogin = loginFormDetected || redirectedToLogin ? "yes" : "unknown";
     const reusable = dataSources.length > 0 || embedded.some((e) => e.canReplaceDom);
     browserNeededAfterLogin = reusable ? "probably not" : "unknown";

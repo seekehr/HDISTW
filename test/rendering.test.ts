@@ -4,7 +4,7 @@ import { capture, jsonReq, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js"
 
 const ssrHtml = `<html><body><h1>Products</h1><ul>${PRODUCTS.map((p) => `<li><span>${p.title}</span> <b>$${p.price}.00</b></li>`).join("")}</ul></body></html>`;
 const shell = `<html><body><div id="root"></div><script src="/app.js"></script></body></html>`;
-const api = (phase: "initial" | "interaction" = "initial") => jsonReq("https://shop.test/api/products", { products: PRODUCTS }, { phase });
+const api = () => jsonReq("https://shop.test/api/products", { products: PRODUCTS });
 
 describe("rendering classification", () => {
   it("server-rendered: content is in the served HTML", () => {
@@ -34,12 +34,5 @@ describe("rendering classification", () => {
     const html = shell.replace("</body>", `<script>window.__INITIAL_STATE__ = ${JSON.stringify({ products: PRODUCTS })}</script></body>`);
     const r = analyzeCapture(capture({ initialHtml: html, renderedText: VISIBLE_PRODUCTS_TEXT })).rendering;
     expect(r.type).toBe("embedded-state-driven");
-  });
-
-  it("interaction-dependent: data only arrives after interaction", () => {
-    const r = analyzeCapture(
-      capture({ initialHtml: shell, renderedText: "Search products", interactionText: VISIBLE_PRODUCTS_TEXT, requests: [api("interaction")], interactive: true }),
-    ).rendering;
-    expect(r.type).toBe("interaction-dependent");
   });
 });

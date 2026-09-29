@@ -2,7 +2,8 @@ import { z } from "zod";
 import { BrowserRequirementSchema, FindingsSchema, RankedStrategySchema, StrategyIdSchema } from "./findings.js";
 
 export const RecommendationSchema = z.object({
-  strategy: StrategyIdSchema,
+  /** Null when the page could not be observed (e.g. blocked by a bot check). */
+  strategy: StrategyIdSchema.nullable(),
   /** The data source to use, e.g. `GET https://example.com/api/products`. Always an observed source. */
   source: z.string(),
   why: z.string(),
@@ -22,12 +23,14 @@ export const ReportSchema = z.object({
   target: z.string(),
   finalUrl: z.string(),
   generatedAt: z.string(),
-  interactive: z.boolean(),
+  usedLoginWindow: z.boolean(),
+  /** "blocked" means the captured page was a bot check, not the site, so nothing was recommended. */
+  outcome: z.enum(["analyzed", "blocked"]),
+  blockedReason: z.string().optional(),
   stats: z.object({
     capturedRequests: z.number().int(),
     ignoredRequests: z.number().int(),
     jsonResponses: z.number().int(),
-    interactionRequests: z.number().int(),
     documentStatus: z.number().int().optional(),
     durationMs: z.number(),
   }),

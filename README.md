@@ -21,14 +21,21 @@ For the Gemini write-up, copy `.env.example` to `.env` and fill in `GEMINI_API_K
 
 ```
 hdistw inspect https://example.com/products
-hdistw inspect https://example.com/products --interactive
 ```
 
-`--interactive` opens a browser you can click around in (scroll, search, log in). Press Enter in the terminal when done. Useful for finding pagination and load-more requests.
-
-Other flags: `--no-ai`, `--out <dir>`, `--timeout <ms>`, `--model <name>`.
-
 Reports go to `reports/<host>/report.md` and `report.json`.
+
+Other flags: `--no-ai`, `--out <dir>`, `--timeout <ms>`, `--model <name>`, `--profile <dir>`, `--login`.
+
+### Logins and bot checks
+
+It loads the page in a hidden browser first. If that hits a login page or a bot check (like Cloudflare's "Just a moment..."), a browser window opens. Log in or pass the check there, then press Enter in the terminal and it captures the page with your session.
+
+Your login is saved in a browser profile (`~/.hdistw/profile` by default), so next time it usually works without the window. That folder holds your login cookies, so keep it private.
+
+Some pages load fine logged out but show more when you're logged in. Use `--login` to always log in first.
+
+If it still only gets a bot check, the report says so and gives no recommendation. It won't try to get around bot checks itself.
 
 ## Notes
 

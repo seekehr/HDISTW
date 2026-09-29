@@ -1,16 +1,11 @@
 import { z } from "zod";
 
-/** Whether a request happened during the initial page load or after the user started interacting. */
-export const PhaseSchema = z.enum(["initial", "interaction"]);
-export type Phase = z.infer<typeof PhaseSchema>;
-
 /**
  * One recorded network request. Headers and request bodies are redacted at
  * capture time; response bodies are kept in memory only (never written to reports).
  */
 export const CapturedRequestSchema = z.object({
   id: z.number().int(),
-  phase: PhaseSchema,
   url: z.string(),
   method: z.string(),
   resourceType: z.string(),
@@ -55,7 +50,8 @@ export const CaptureSchema = z.object({
   finalUrl: z.string(),
   startedAt: z.string(),
   durationMs: z.number(),
-  interactive: z.boolean(),
+  /** True when a visible window was opened so the user could log in or pass a bot check. */
+  usedLoginWindow: z.boolean(),
   document: z.object({
     status: z.number().int().optional(),
     headers: z.record(z.string(), z.string()),
@@ -67,8 +63,6 @@ export const CaptureSchema = z.object({
   renderedHtml: z.string(),
   /** Visible text after the initial load settled. */
   renderedText: z.string(),
-  /** Extra visible text seen during interactive browsing. */
-  interactionText: z.string(),
   dom: DomInfoSchema,
   requests: z.array(CapturedRequestSchema),
   ignored: z.object({

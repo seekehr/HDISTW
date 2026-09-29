@@ -2,10 +2,10 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { chromium } from "playwright";
+import { chromium, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { captureSite } from "../src/browser/capture.js";
-import { buildReport } from "../src/inspect.js";
+import { buildReport, loginReason } from "../src/inspect.js";
 import { writeReport } from "../src/reports/write.js";
 import { startFixtureServer } from "./fixtures/server.js";
 
@@ -27,7 +27,7 @@ describe.skipIf(!hasChromium)("end-to-end against a local fixture site", () => {
   });
 
   const inspect = async (p: string, extra: Partial<Parameters<typeof captureSite>[0]> = {}) => {
-    const cap = await captureSite({ url: `${srv.url}${p}`, interactive: false, timeoutMs: 15_000, settleMs: 300, ...extra });
+    const cap = await captureSite({ url: `${srv.url}${p}`, timeoutMs: 15_000, settleMs: 300, ...extra });
     return { cap, report: await buildReport(cap) };
   };
 
@@ -37,22 +37,6 @@ describe.skipIf(!hasChromium)("end-to-end against a local fixture site", () => {
     expect(cap.renderedText).toContain("Fixture Lamp 1");
     expect(report.findings.rendering.type).toBe("API-driven");
     expect(report.recommendation).toMatchObject({ strategy: "rest-api", source: "GET /api/products", browserRequired: "no" });
-  });
-
-  it("interactive mode separates interaction traffic and confirms cursor pagination", async () => {
-    const { cap, report } = await inspect("/spa", {
-      interactive: true,
-      headless: true,
-      waitForUser: async (page) => {
-        for (let i = 0; i < 2; i++) {
-          await page.click("#more");
-          await page.waitForTimeout(400);
-        }
-      },
-    });
-    expect(cap.requests.filter((r) => r.phase === "interaction" && r.url.includes("/api/products"))).toHaveLength(2);
-    expect(report.findings.pagination[0]).toMatchObject({ type: "cursor", requestParams: ["cursor"], confirmed: true });
-    expect(report.codeExample).toContain('url.searchParams.set("cursor", cursor)');
   });
 
   it("GraphQL page -> GraphQL", async () => {
@@ -79,9 +63,48 @@ describe.skipIf(!hasChromium)("end-to-end against a local fixture site", () => {
     }
   });
 
-  it("login redirect -> authentication required", async () => {
-    const { report } = await inspect("/account");
-    expect(report.findings.auth.authRequired).toBe("yes");
-    expect(report.findings.auth.browserNeededForLogin).toBe("yes");
+  it("bot check -> blocked, no recommendation", async () => {
+    const { report } = await inspect("/guarded");
+    expect(report.outcome).toBe("blocked");
+    expect(report.recommendation.strategy).toBeNull();
+  });
+
+  it("bot check -> login window -> user passes it -> real page analyzed", async () => {
+    const { cap: first } = await inspect("/guarded");
+    expect(loginReason(first)).toMatch(/bot check/);
+    const { cap, report } = await inspect("/guarded", {
+      login: { headless: true, waitForUser: (page) => page.click("#pass").then(() => page.waitForSelector("text=Fixture Lamp 1")).then(() => undefined) },
+    });
+    expect(cap.usedLoginWindow).toBe(true);
+    expect(report.outcome).toBe("analyzed");
+    expect(report.recommendation).toMatchObject({ strategy: "rest-api", source: "GET /api/products" });
+  });
+
+  it("login redirect -> login window; the profile keeps the login for the next run", async () => {
+    const profileDir = await mkdtemp(path.join(tmpdir(), "hdistw-profile-"));
+    try {
+      const { cap: first, report: firstReport } = await inspect("/account", { profileDir });
+      expect(firstReport.findings.auth.authRequired).toBe("yes");
+      expect(loginReason(first)).toMatch(/login page/);
+
+      const signIn = async (page: Page) => {
+        await page.click("#signin");
+        await page.waitForSelector("text=Fixture Lamp 1");
+      };
+      const { report } = await inspect("/account", { profileDir, login: { headless: true, waitForUser: signIn } });
+      expect(report.recommendation).toMatchObject({ strategy: "rest-api", source: "GET /api/products" });
+
+      // No login window this time: the saved profile is already logged in.
+      const { cap: later } = await inspect("/account", { profileDir });
+      expect(loginReason(later)).toBeUndefined();
+      expect(later.renderedText).toContain("Fixture Lamp 1");
+    } finally {
+      await rm(profileDir, { recursive: true, force: true });
+    }
+  });
+
+  it("public page -> no login window needed", async () => {
+    const { cap } = await inspect("/spa");
+    expect(loginReason(cap)).toBeUndefined();
   });
 });

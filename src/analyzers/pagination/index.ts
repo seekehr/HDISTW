@@ -88,8 +88,6 @@ function analyzeGroup(group: Group): PaginationFinding | undefined {
   if (strongFields.length) evidence.push(`response fields: ${strongFields.map(([p]) => p).join(", ")}`);
   const varying = Object.entries(observed).filter(([name, values]) => values.size > 1 && paramKind(name) !== "limit");
   for (const [name, values] of varying) evidence.push(`${values.size} requests with different \`${name}\` values`);
-  const interactionCount = group.requests.filter((r) => r.phase === "interaction").length;
-  if (interactionCount) evidence.push(`${interactionCount} request(s) triggered by interaction`);
 
   return {
     endpoint: group.endpoint,
@@ -118,7 +116,7 @@ function htmlPagination(ctx: AnalysisContext): PaginationFinding | undefined {
   if (paginationLinks.length) evidence.push(`${paginationLinks.length} pagination link(s) in the DOM`);
   if (pathStyle) evidence.push("path-based page numbers (/page/N or page-N)");
   if (hasLoadMoreButton)
-    evidence.push(`load-more button (probably triggers an API request${ctx.capture.interactive ? "" : "; try --interactive"})`);
+    evidence.push("load-more button (its request only fires when clicked, so it was not observed)");
   return {
     endpoint: shortUrl(urlWithoutQuery(ctx.pageUrl), ctx.pageUrl),
     source: "html",

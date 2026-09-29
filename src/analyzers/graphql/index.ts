@@ -144,7 +144,6 @@ export function analyzeGraphQL(ctx: AnalysisContext): GraphQLOperation[] {
         variables: op.variables ? (redactJson(op.variables) as Record<string, unknown>) : undefined,
         entityType: typename(response, assessment.recordSet?.path) ?? entityType(response, assessment.recordSet?.path),
         paginationFields: [...varPagination, ...respPagination],
-        phase: existing?.phase === "initial" ? "initial" : req.phase,
         status: req.status,
         occurrences: (existing?.occurrences ?? 0) + 1,
         sentCookies: sentCookies(req),
@@ -154,7 +153,7 @@ export function analyzeGraphQL(ctx: AnalysisContext): GraphQLOperation[] {
         assessment,
       };
       if (!existing || candidate.score > existing.score) byKey.set(key, candidate);
-      else byKey.set(key, { ...existing, occurrences: candidate.occurrences, phase: candidate.phase });
+      else byKey.set(key, { ...existing, occurrences: candidate.occurrences });
     });
   }
   return [...byKey.values()].sort((a, b) => b.score - a.score).slice(0, 15);

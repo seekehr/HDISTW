@@ -1,5 +1,5 @@
-import { chromium, type BrowserContext, type Page, type Request } from "playwright";
-import type { Capture, CapturedRequest, CookieInfo, DomInfo, Phase } from "../schemas/capture.js";
+import { chromium, type Browser, type BrowserContext, type Page, type Request } from "playwright";
+import type { Capture, CapturedRequest, CookieInfo, DomInfo } from "../schemas/capture.js";
 import { redactBody, redactHeaders, redactUrl } from "../utils/redact.js";
 import { ignoreReason, shouldKeepBody } from "./filters.js";
 
@@ -9,14 +9,21 @@ const MAX_TEXT = 1_000_000;
 
 export interface CaptureOptions {
   url: string;
-  interactive: boolean;
   timeoutMs: number;
   /** Extra quiet time after the load settles, to catch late fetches. */
   settleMs: number;
-  /** Interactive mode: resolves when the user is done browsing. Receives the page (used by tests). */
-  waitForUser?: (page: Page) => Promise<void>;
-  /** Override headless (defaults to headless unless interactive). */
-  headless?: boolean;
+  /** Persistent Chromium profile directory, so logins survive between runs. */
+  profileDir?: string;
+  /**
+   * Open a visible window first so the user can log in or pass a bot check.
+   * The page is then reloaded in that session and captured.
+   */
+  login?: {
+    /** Resolves when the user is done. Receives the page (used by tests). */
+    waitForUser: (page: Page) => Promise<void>;
+    /** Tests only: run the "window" headless. */
+    headless?: boolean;
+  };
   onStatus?: (message: string) => void;
 }
 
@@ -67,17 +74,49 @@ function isMainFrameNavigation(req: Request): boolean {
   }
 }
 
+/** Shows the page in a visible window and waits until the user has logged in / passed the check. */
+async function waitForLogin(context: BrowserContext, opts: CaptureOptions, login: NonNullable<CaptureOptions["login"]>) {
+  const page = context.pages()[0] ?? (await context.newPage());
+  await page.goto(opts.url, { waitUntil: "domcontentloaded", timeout: opts.timeoutMs }).catch(() => undefined);
+  let closed = false;
+  const windowClosed = new Promise<void>((resolve) => {
+    context.on("close", () => ((closed = true), resolve()));
+    page.on("close", () => {
+      if (context.pages().length === 0) (closed = true), resolve();
+    });
+  });
+  await Promise.race([login.waitForUser(page), windowClosed]);
+  if (closed || context.pages().length === 0) throw new Error("The browser window was closed before the page was captured.");
+}
+
 /**
  * Loads a page in Chromium and records its data-relevant network traffic.
- * Listeners are attached before navigation so nothing from the initial load is missed.
+ * Listeners are attached before navigation so nothing from the load is missed.
  */
 export async function captureSite(opts: CaptureOptions): Promise<Capture> {
+  const headless = opts.login ? (opts.login.headless ?? false) : true;
+  const viewport = headless ? { width: 1366, height: 900 } : null;
+  let browser: Browser | undefined;
+  let context: BrowserContext;
+  if (opts.profileDir) {
+    context = await chromium.launchPersistentContext(opts.profileDir, { headless, viewport });
+  } else {
+    browser = await chromium.launch({ headless });
+    context = await browser.newContext({ viewport });
+  }
+
+  try {
+    if (opts.login) await waitForLogin(context, opts, opts.login);
+    return await recordLoad(context, opts);
+  } finally {
+    await context.close().catch(() => undefined);
+    await browser?.close().catch(() => undefined);
+  }
+}
+
+async function recordLoad(context: BrowserContext, opts: CaptureOptions): Promise<Capture> {
   const started = Date.now();
   const errors: string[] = [];
-  const browser = await chromium.launch({ headless: opts.headless ?? !opts.interactive });
-  const context = await browser.newContext(opts.interactive ? { viewport: null } : { viewport: { width: 1366, height: 900 } });
-
-  let phase: Phase = "initial";
   let nextId = 1;
   const entries = new Map<Request, CapturedRequest>();
   const pending = new Set<Promise<void>>();
@@ -96,7 +135,6 @@ export async function captureSite(opts: CaptureOptions): Promise<Capture> {
     }
     const entry: CapturedRequest = {
       id: nextId++,
-      phase,
       url: redactUrl(req.url()),
       method: req.method(),
       resourceType: req.resourceType(),
@@ -143,7 +181,7 @@ export async function captureSite(opts: CaptureOptions): Promise<Capture> {
     if (entry) entry.failure = req.failure()?.errorText ?? "failed";
   });
 
-  const page = await context.newPage();
+  const page = context.pages()[0] ?? (await context.newPage());
   let initialHtml = "";
   let documentStatus: number | undefined;
   let documentHeaders: Record<string, string> = {};
@@ -179,53 +217,24 @@ export async function captureSite(opts: CaptureOptions): Promise<Capture> {
     errors.push(`Could not read the rendered DOM: ${(err as Error).message.split("\n")[0]}`);
   }
   const finalUrl = page.url();
-  let cookies = toCookieInfo(await context.cookies().catch(() => []));
-
-  const interactionLines = new Set<string>();
-  if (opts.interactive) {
-    phase = "interaction";
-    opts.onStatus?.("Browser is open. Browse normally: search, filter, scroll, paginate, log in.");
-    const collect = async () => {
-      for (const p of context.pages()) {
-        const s = await snapshot(p).catch(() => undefined);
-        if (!s) continue;
-        if (s.hasPasswordField) snap.hasPasswordField = true;
-        if (s.hasLoadMoreButton) snap.hasLoadMoreButton = true;
-        snap.paginationLinks = [...new Set([...snap.paginationLinks, ...s.paginationLinks])].slice(0, 30);
-        for (const line of s.text.split("\n")) if (interactionLines.size < 20_000 && line.trim()) interactionLines.add(line.trim());
-      }
-      const latest = await context.cookies().catch(() => undefined);
-      if (latest) cookies = toCookieInfo(latest);
-    };
-    const timer = setInterval(() => void collect(), 3_000);
-    const closed = new Promise<void>((resolve) => {
-      browser.on("disconnected", () => resolve());
-      context.on("page", (p) => p.on("close", () => context.pages().length === 0 && resolve()));
-      page.on("close", () => context.pages().length === 0 && resolve());
-    });
-    await Promise.race([opts.waitForUser?.(page) ?? new Promise<void>(() => undefined), closed]);
-    clearInterval(timer);
-    if (browser.isConnected()) await collect();
-  }
+  const cookies = toCookieInfo(await context.cookies().catch(() => []));
 
   // Let in-flight body reads finish (bounded).
   const deadline = Date.now() + 5_000;
   while (pending.size && Date.now() < deadline) {
     await Promise.race([Promise.allSettled([...pending]), new Promise((r) => setTimeout(r, 500))]);
   }
-  await browser.close().catch(() => undefined);
 
   return {
     target: opts.url,
     finalUrl: redactUrl(finalUrl || opts.url),
     startedAt: new Date(started).toISOString(),
     durationMs: Date.now() - started,
-    interactive: opts.interactive,
+    usedLoginWindow: !!opts.login,
     document: { status: documentStatus, headers: documentHeaders, redirectChain },
     initialHtml,
     renderedHtml,
     renderedText: snap.text.slice(0, MAX_TEXT),
-    interactionText: [...interactionLines].join("\n").slice(0, MAX_TEXT),
     dom: {
       title: snap.title,
       hasPasswordField: snap.hasPasswordField,
