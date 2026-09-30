@@ -1,9 +1,8 @@
 node_modules/
 dist/
-reports/
+/reports/
 .env
 *.log
-.hdistw-profile/
 .claude/
 .idea/
 .vscode/

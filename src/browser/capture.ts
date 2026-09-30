@@ -30,7 +30,6 @@ export interface CaptureOptions {
     /** Tests only: run the "window" headless. */
     headless?: boolean;
   };
-  onStatus?: (message: string) => void;
 }
 
 interface Snapshot extends DomInfo {

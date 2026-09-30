@@ -117,11 +117,6 @@ program
   });
 
 program.parseAsync().catch((err: unknown) => {
-  const message = err instanceof Error ? err.message : String(err);
-  if (/Executable doesn't exist|browserType\.launch/i.test(message)) {
-    console.error(fail("Chrome is not installed or not found. Run: npx playwright install chrome"));
-  } else {
-    console.error(fail(message));
-  }
+  console.error(fail(err instanceof Error ? err.message : String(err)));
   process.exit(1);
 });

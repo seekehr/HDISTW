@@ -1,13 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { GeminiClient } from "../src/ai/gemini.js";
 import { buildReport } from "../src/inspect.js";
-import { capture, jsonReq, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js";
+import { site } from "./sites.js";
 
-const cap = capture({
-  initialHtml: "<html><body><div id=root></div></body></html>",
-  renderedText: VISIBLE_PRODUCTS_TEXT,
-  requests: [jsonReq("https://shop.test/api/products?page=1", { data: PRODUCTS, meta: { nextPage: 2 } }, { requestHeaders: { cookie: "[REDACTED]: 1 cookie" } })],
-});
+// A real crates.io capture; Gemini itself is stubbed (tests never call the API).
+const SOURCE = "GET /api/v1/crates?page=1&per_page=50&sort=downloads";
 
 function fakeClient(answer: unknown): GeminiClient & { prompts: string[] } {
   const prompts: string[] = [];
@@ -23,47 +20,53 @@ function fakeClient(answer: unknown): GeminiClient & { prompts: string[] } {
 
 const valid = {
   strategy: "rest-api",
-  source: "GET /api/products?page=1",
-  why: "The endpoint returns the product records shown on the page.",
+  source: SOURCE,
+  why: "The endpoint returns the crates listed on the page.",
   browserRequired: "no",
   browserOnlyForAuth: false,
-  pagination: "Increment `page` until `meta.nextPage` is null.",
+  pagination: "Increment `page` until `meta.next_page` is null.",
   statePreserve: [],
   avoid: ["DOM scraping"],
   uncertainties: [],
 };
 
-describe("Gemini analysis", () => {
+describe("Gemini analysis (real crates.io capture)", () => {
   it("uses a valid Gemini recommendation", async () => {
     const client = fakeClient(valid);
-    const report = await buildReport(cap, { gemini: client });
+    const report = await buildReport(site("crates"), { gemini: client });
     expect(report.ai).toMatchObject({ used: true, model: "fake-gemini" });
-    expect(report.recommendation).toMatchObject({ generatedBy: "gemini", source: "GET /api/products?page=1" });
+    expect(report.recommendation).toMatchObject({ generatedBy: "gemini", source: SOURCE });
     expect(client.prompts[0]).toContain("candidateEndpoints");
+    expect(client.prompts[0]).toContain("/api/v1/crates");
   });
 
   it("rejects endpoints Gemini invented", async () => {
-    const report = await buildReport(cap, {
-      gemini: fakeClient({ ...valid, source: "GET https://shop.test/api/v9/secret-export", why: "Use GET https://shop.test/api/v9/all instead." }),
+    const report = await buildReport(site("crates"), {
+      gemini: fakeClient({ ...valid, source: "GET https://crates.io/api/v9/secret-export", why: "Use GET https://crates.io/api/v9/all instead." }),
     });
-    expect(report.recommendation.source).toBe("GET /api/products?page=1");
+    expect(report.recommendation.source).toBe(SOURCE);
     expect(report.recommendation.uncertainties.join(" ")).toMatch(/unobserved source/);
     expect(report.recommendation.uncertainties.join(" ")).toMatch(/not observed.*api\/v9\/all/);
   });
 
+  it("accepts an observed URL mentioned in the text", async () => {
+    const report = await buildReport(site("crates"), { gemini: fakeClient({ ...valid, why: "Call GET https://crates.io/api/v1/crates directly." }) });
+    expect(report.recommendation.uncertainties.join(" ")).not.toMatch(/not observed/);
+  });
+
   it("falls back to the deterministic recommendation on bad output or errors", async () => {
-    const bad = await buildReport(cap, { gemini: fakeClient("not json") });
+    const bad = await buildReport(site("crates"), { gemini: fakeClient("not json") });
     expect(bad.recommendation.generatedBy).toBe("deterministic");
     expect(bad.ai.used).toBe(false);
 
     const failing: GeminiClient = { model: "x", generate: () => Promise.reject(new Error("quota exceeded")) };
-    const failed = await buildReport(cap, { gemini: failing });
+    const failed = await buildReport(site("crates"), { gemini: failing });
     expect(failed.recommendation.generatedBy).toBe("deterministic");
     expect(failed.ai.note).toMatch(/quota exceeded/);
   });
 
   it("rejects strategies that were not ranked", async () => {
-    const report = await buildReport(cap, { gemini: fakeClient({ ...valid, strategy: "graphql" }) });
+    const report = await buildReport(site("crates"), { gemini: fakeClient({ ...valid, strategy: "graphql" }) });
     expect(report.recommendation.generatedBy).toBe("deterministic");
   });
 });

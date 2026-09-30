@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "setup:browser": "playwright install chromium"
+    "setup:browser": "playwright install chromium",
+    "record:sites": "tsx scripts/record-sites.ts"
   },
   "license": "MIT",
   "dependencies": {

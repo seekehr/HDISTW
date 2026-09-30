@@ -1,48 +1,56 @@
 import { describe, expect, it } from "vitest";
 import { buildContext } from "../src/analyzers/context.js";
 import { analyzeEmbeddedState, extractBalanced } from "../src/analyzers/embedded-state/index.js";
-import { capture, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js";
+import { site } from "./sites.js";
 
-describe("embedded state detection", () => {
-  it("finds window.__INITIAL_STATE__ and decides it can replace DOM scraping", () => {
-    const html = `<html><body><script>window.dataLayer = [{"event":"pageview","page":"/x","user":"anon","id":1}];
-window.__INITIAL_STATE__ = ${JSON.stringify({ catalog: { products: PRODUCTS } })};</script></body></html>`;
-    const [state, ...rest] = analyzeEmbeddedState(buildContext(capture({ initialHtml: html, renderedText: VISIBLE_PRODUCTS_TEXT })));
-    expect(rest).toHaveLength(0); // dataLayer is ignored
-    expect(state).toMatchObject({ name: "__INITIAL_STATE__", kind: "window-assignment", locator: "window.__INITIAL_STATE__", parseable: true, canReplaceDom: true });
-    expect(state?.assessment?.recordSet?.path).toBe("catalog.products");
+const embedded = (name: Parameters<typeof site>[0]) => analyzeEmbeddedState(buildContext(site(name)));
+
+describe("embedded state detection (real sites)", () => {
+  it("quotes.toscrape.com/js: finds `var data = [...]` and decides it can replace DOM scraping", () => {
+    const [state, ...rest] = embedded("quotes-js");
+    expect(rest).toHaveLength(0);
+    expect(state).toMatchObject({ name: "data", kind: "window-assignment", locator: "window.data", parseable: true, canReplaceDom: true });
+    expect(state?.assessment?.recordSet).toMatchObject({ path: "", count: 10 });
+    expect(state?.assessment?.visibleOverlap).toBe(1);
   });
 
-  it("handles JSON.parse('...') assignments and JSON script blocks", () => {
-    const encoded = JSON.stringify(JSON.stringify({ items: PRODUCTS }));
-    const html = `<script>window.__APP_DATA__ = JSON.parse(${encoded});</script>
-<script id="__APOLLO_STATE__" type="application/json">${JSON.stringify({ "Product:1": PRODUCTS[0], "Product:2": PRODUCTS[1], "Product:3": PRODUCTS[2] })}</script>`;
-    const found = analyzeEmbeddedState(buildContext(capture({ initialHtml: html, renderedText: VISIBLE_PRODUCTS_TEXT })));
-    expect(found.map((f) => f.locator)).toEqual(expect.arrayContaining(["window.__APP_DATA__", "script#__APOLLO_STATE__"]));
-    const apollo = found.find((f) => f.name === "__APOLLO_STATE__");
-    expect(apollo?.assessment?.recordSet?.path).toBe("*");
+  it("quotes.toscrape.com/js: extractBalanced pulls the literal out of the real script", () => {
+    const html = site("quotes-js").initialHtml;
+    const start = html.indexOf("[", html.indexOf("var data"));
+    const literal = extractBalanced(html, start);
+    expect(JSON.parse(literal!)).toHaveLength(10);
   });
 
-  it("classifies JSON-LD content vs metadata", () => {
-    const product = { "@context": "https://schema.org", "@type": "Product", name: "Ergonomic Widget 1", offers: { "@type": "Offer", price: "10.00" } };
-    const org = { "@context": "https://schema.org", "@type": "Organization", name: "Shop Inc", url: "https://shop.test" };
-    const html = `<script type="application/ld+json">${JSON.stringify(product)}</script><script type="application/ld+json">${JSON.stringify(org)}</script>`;
-    const found = analyzeEmbeddedState(buildContext(capture({ initialHtml: html, renderedText: "Ergonomic Widget 1 $10.00" })));
-    const p = found.find((f) => f.jsonLdTypes?.includes("Product"));
-    const o = found.find((f) => f.jsonLdTypes?.includes("Organization"));
-    expect(p?.canReplaceDom).toBe(true);
-    expect(o?.canReplaceDom).toBe(false);
-    expect(p!.score).toBeGreaterThan(o!.score);
+  it("Airbnb: the JSON script with the search results replaces DOM scraping", () => {
+    const [best] = embedded("airbnb");
+    expect(best).toMatchObject({ locator: "script#data-deferred-state-0", kind: "json-script", canReplaceDom: true });
+    expect(best?.assessment?.recordSet?.path).toMatch(/staysSearch/);
+    expect(best?.assessment?.visibleOverlap).toBeGreaterThanOrEqual(0.5);
   });
 
-  it("reports non-JSON serialized state as unparseable", () => {
-    const html = `<script>window.__PRELOADED_STATE__ = {user: undefined, items: [1,2,3], note: 'this is not strict json at all'};</script>`;
-    const [s] = analyzeEmbeddedState(buildContext(capture({ initialHtml: html })));
-    expect(s).toMatchObject({ kind: "serialized-js", parseable: false, canReplaceDom: false });
+  it("Coursera: finds window.__APOLLO_STATE__", () => {
+    const apollo = embedded("coursera").find((e) => e.locator === "window.__APOLLO_STATE__");
+    expect(apollo).toMatchObject({ kind: "window-assignment", parseable: true });
   });
 
-  it("extracts balanced literals containing braces in strings", () => {
-    const src = `x = {"a":"}{","b":[1,{"c":"]"}]}; more`;
-    expect(extractBalanced(src, 4)).toBe(`{"a":"}{","b":[1,{"c":"]"}]}`);
+  it("Hashnode: content JSON-LD beats metadata JSON-LD", () => {
+    const found = embedded("hashnode");
+    const list = found.find((e) => e.jsonLdTypes?.includes("ItemList"));
+    const website = found.find((e) => e.jsonLdTypes?.includes("WebSite"));
+    expect(list).toMatchObject({ kind: "json-ld", canReplaceDom: true });
+    expect(list?.reasons.join(" ")).toMatch(/schema\.org content types/);
+    expect(website).toMatchObject({ canReplaceDom: false });
+    expect(website?.reasons.join(" ")).toMatch(/metadata only/);
+    expect(list!.score).toBeGreaterThan(website!.score);
+  });
+
+  it("AniList: ItemList JSON-LD that is not what the page shows cannot replace the DOM", () => {
+    const [ld] = embedded("anilist");
+    expect(ld?.jsonLdTypes).toContain("ItemList");
+    expect(ld?.canReplaceDom).toBe(false);
+  });
+
+  it("ignores __NEXT_DATA__ (reported by the Next.js analyzer)", () => {
+    expect(embedded("bbc-news").some((e) => e.locator.includes("__NEXT_DATA__"))).toBe(false);
   });
 });

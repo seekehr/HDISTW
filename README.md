@@ -4,7 +4,7 @@ HowDoIScrapeThisWebsite. Point it at a URL and it tells you where the page gets 
 
 ## Preview
 
-<img src="image preview/preview.png" alt="Preview">
+<img src="preview/preview.png" alt="Preview">
 
 ## Setup
 
@@ -12,7 +12,6 @@ Needs Node 20+ and Google Chrome installed.
 
 ```
 npm install
-npx playwright install chrome
 npm run build
 npm link
 ```
@@ -50,4 +49,13 @@ Cookies, tokens and auth headers are redacted before anything is saved or sent t
 ```
 npm test
 npm run typecheck
+```
+
+The end-to-end test runs Playwright's Chromium against a local fixture site; install it with `npm run setup:browser` (it's skipped otherwise).
+
+Unit tests replay captures of real websites saved in `test/fixtures/sites/`. To re-record them (all, or just the named ones):
+
+```
+npm run record:sites
+npm run record:sites crates hackerone
 ```

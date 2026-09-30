@@ -1,38 +1,43 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCapture } from "../src/analyzers/index.js";
-import { capture, jsonReq, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js";
+import { site } from "./sites.js";
 
-const ssrHtml = `<html><body><h1>Products</h1><ul>${PRODUCTS.map((p) => `<li><span>${p.title}</span> <b>$${p.price}.00</b></li>`).join("")}</ul></body></html>`;
-const shell = `<html><body><div id="root"></div><script src="/app.js"></script></body></html>`;
-const api = () => jsonReq("https://shop.test/api/products", { products: PRODUCTS });
+const rendering = (name: Parameters<typeof site>[0]) => analyzeCapture(site(name)).rendering;
 
-describe("rendering classification", () => {
-  it("server-rendered: content is in the served HTML", () => {
-    const r = analyzeCapture(capture({ initialHtml: ssrHtml, renderedText: VISIBLE_PRODUCTS_TEXT })).rendering;
-    expect(r.type).toBe("server-rendered");
-    expect(r.initialHtmlCoverage).toBeGreaterThan(0.9);
+describe("rendering classification (real sites)", () => {
+  it("server-rendered: books.toscrape.com, quotes.toscrape.com", () => {
+    for (const name of ["books-toscrape", "quotes-ssr"] as const) {
+      const r = rendering(name);
+      expect(r.type).toBe("server-rendered");
+      expect(r.initialHtmlCoverage).toBeGreaterThan(0.9);
+    }
   });
 
-  it("hybrid: SSR content plus data APIs during load", () => {
-    const r = analyzeCapture(capture({ initialHtml: ssrHtml, renderedText: VISIBLE_PRODUCTS_TEXT, requests: [api()] })).rendering;
+  it("hybrid: Hashnode ships SSR content and also fetches data during load", () => {
+    const r = rendering("hashnode");
     expect(r.type).toBe("hybrid");
-  });
-
-  it("API-driven: empty shell filled from an API", () => {
-    const r = analyzeCapture(capture({ initialHtml: shell, renderedText: VISIBLE_PRODUCTS_TEXT, requests: [api()] })).rendering;
-    expect(r.type).toBe("API-driven");
-    expect(r.initialHtmlCoverage).toBe(0);
     expect(r.traits).toContain("page data fetched by JavaScript during load");
   });
 
-  it("client-rendered: empty shell, no identifiable data source", () => {
-    const r = analyzeCapture(capture({ initialHtml: shell, renderedText: VISIBLE_PRODUCTS_TEXT })).rendering;
-    expect(r.type).toBe("client-rendered");
+  it("API-driven: quotes/scroll, crates.io and HackerOne fill an empty shell from an API", () => {
+    for (const name of ["quotes-scroll", "crates", "hackerone"] as const) {
+      const r = rendering(name);
+      expect(r.type).toBe("API-driven");
+      expect(r.initialHtmlCoverage).toBeLessThan(0.35);
+      expect(r.traits).toContain("page data fetched by JavaScript during load");
+    }
   });
 
-  it("embedded-state-driven: shell plus serialized state", () => {
-    const html = shell.replace("</body>", `<script>window.__INITIAL_STATE__ = ${JSON.stringify({ products: PRODUCTS })}</script></body>`);
-    const r = analyzeCapture(capture({ initialHtml: html, renderedText: VISIBLE_PRODUCTS_TEXT })).rendering;
-    expect(r.type).toBe("embedded-state-driven");
+  it("embedded-state-driven: quotes/js and Airbnb render from serialized state", () => {
+    for (const name of ["quotes-js", "airbnb"] as const) {
+      const r = rendering(name);
+      expect(r.type).toBe("embedded-state-driven");
+      expect(r.traits).toContain("page data serialized in the HTML");
+    }
+  });
+
+  it("notes the Next.js router as a trait", () => {
+    expect(rendering("bbc-news").traits).toContain("Next.js (pages router)");
+    expect(rendering("nextjs-org").traits).toContain("Next.js (app router)");
   });
 });

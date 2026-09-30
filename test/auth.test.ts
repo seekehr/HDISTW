@@ -1,74 +1,59 @@
 import { describe, expect, it } from "vitest";
 import { analyzeCapture } from "../src/analyzers/index.js";
-import { capture, jsonReq, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js";
+import { loginReason } from "../src/inspect.js";
+import { site } from "./sites.js";
 
-const cookie = (name: string) => ({ name, domain: "shop.test", path: "/", httpOnly: true, secure: true, sameSite: "Lax", session: true });
+const auth = (name: Parameters<typeof site>[0]) => analyzeCapture(site(name)).auth;
 
-describe("authentication metadata", () => {
-  it("reports nothing for anonymous public data", () => {
-    const a = analyzeCapture(capture({ requests: [jsonReq("https://shop.test/api/products", { data: PRODUCTS })], renderedText: VISIBLE_PRODUCTS_TEXT })).auth;
-    expect(a.authRequired).toBe("no");
-    expect(a.mechanisms).toEqual([]);
-    expect(a.browserNeededForLogin).toBe("no");
+describe("authentication metadata (real sites)", () => {
+  it("crates.io: public data, nothing to report", () => {
+    const a = auth("crates");
+    expect(a).toMatchObject({ authRequired: "no", mechanisms: [], browserNeededForLogin: "no", botProtection: [] });
   });
 
-  it("treats anonymous session cookies as not requiring login", () => {
-    const a = analyzeCapture(
-      capture({
-        cookies: [cookie("PHPSESSID"), cookie("_ga")],
-        requests: [jsonReq("https://shop.test/api/products", { data: PRODUCTS }, { requestHeaders: { cookie: "[REDACTED]: 2 cookies" } })],
-        renderedText: VISIBLE_PRODUCTS_TEXT,
-      }),
-    ).auth;
-    expect(a.mechanisms).toEqual(["Session cookie"]);
-    expect(a.sessionCookies.map((c) => c.name)).toEqual(["PHPSESSID"]);
+  it("Hashnode: anonymous session cookies do not mean a login is required", () => {
+    const a = auth("hashnode");
+    expect(a.mechanisms).toContain("Session cookie");
     expect(a.authRequired).toBe("no");
     expect(a.notes.join(" ")).toMatch(/anonymous session cookies/);
   });
 
-  it("detects bearer tokens and CSRF headers without exposing values", () => {
-    const f = analyzeCapture(
-      capture({
-        requests: [
-          jsonReq("https://shop.test/api/orders", { orders: PRODUCTS }, {
-            requestHeaders: { authorization: "Bearer [REDACTED]", "x-csrf-token": "[REDACTED]" },
-          }),
-        ],
-        renderedText: VISIBLE_PRODUCTS_TEXT,
-      }),
-    );
-    const a = f.auth;
-    expect(a.mechanisms).toEqual(expect.arrayContaining(["Bearer token (Authorization header)", "CSRF token header"]));
-    expect(a.authorizationSchemes[0]).toEqual({ scheme: "Bearer", endpoints: ["/api/orders"] });
-    expect(a.authRequired).toBe("likely");
-    expect(a.browserNeededAfterLogin).toBe("probably not");
-    expect(JSON.stringify(a)).not.toMatch(/eyJ|secret/);
+  it("nextjs.org: a 401 from a session probe on a public page is not a login wall", () => {
+    const a = auth("nextjs-org");
+    expect(a.deniedResponses).toContainEqual({ url: "/api/get-session", status: 401 });
+    expect(a.authRequired).toBe("no");
+    expect(a.notes.join(" ")).toMatch(/page content loaded without logging in/);
   });
 
-  it("detects login redirects and login forms", () => {
-    const a = analyzeCapture(
-      capture({
-        target: "https://shop.test/account",
-        finalUrl: "https://shop.test/login?next=%2Faccount",
-        document: { status: 200, headers: {}, redirectChain: ["https://shop.test/account"] },
-        dom: { title: "Sign in", hasPasswordField: true, paginationLinks: [], hasLoadMoreButton: false },
-      }),
-    ).auth;
+  it("HackerOne: CSRF header detected by name, value never kept", () => {
+    const a = auth("hackerone");
+    expect(a.csrfHeaders).toContain("x-csrf-token");
+    expect(a.mechanisms).toContain("CSRF token header");
+    const sent = site("hackerone").requests.map((r) => r.requestHeaders["x-csrf-token"]).filter(Boolean);
+    expect(sent.length).toBeGreaterThan(0);
+    expect(new Set(sent)).toEqual(new Set(["[REDACTED]"]));
+  });
+
+  it("Twitch: public client-id header is reported as an API key header", () => {
+    expect(auth("twitch").apiKeyHeaders).toContain("client-id");
+  });
+
+  it("GitHub: redirect to a login form means login is required", () => {
+    const a = auth("github-settings");
     expect(a.authRequired).toBe("yes");
-    expect(a.loginRedirect).toBe("https://shop.test/login?next=%2Faccount");
+    expect(a.loginRedirect).toMatch(/^https:\/\/github\.com\/login\?return_to=/);
     expect(a.mechanisms).toEqual(expect.arrayContaining(["Login redirect", "Login form (password field)"]));
     expect(a.browserNeededForLogin).toBe("yes");
+    expect(loginReason(site("github-settings"))).toMatch(/login page/);
   });
 
-  it("detects 401/403 data responses and bot protection", () => {
-    const a = analyzeCapture(
-      capture({
-        cookies: [cookie("cf_clearance")],
-        requests: [jsonReq("https://shop.test/api/private", { error: "unauthorized" }, { status: 401 })],
-      }),
-    ).auth;
-    expect(a.deniedResponses).toEqual([{ url: "/api/private", status: 401 }]);
-    expect(a.authRequired).toBe("likely");
-    expect(a.botProtection).toContain("Cloudflare bot management");
+  it("detects bot protection vendors from real cookies and headers", () => {
+    expect(auth("airbnb").botProtection).toContain("DataDome");
+    expect(auth("hn-algolia").botProtection).toContain("Cloudflare bot management");
+    expect(auth("cf-challenge").botProtection).toContain("Cloudflare challenge");
+  });
+
+  it("public pages need no login window", () => {
+    for (const name of ["crates", "books-toscrape", "hashnode", "bbc-news"] as const) expect(loginReason(site(name))).toBeUndefined();
   });
 });

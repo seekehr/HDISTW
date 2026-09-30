@@ -1,84 +1,69 @@
 import { describe, expect, it } from "vitest";
 import { buildContext } from "../src/analyzers/context.js";
-import { analyzeGraphQL, isGraphQLRequest } from "../src/analyzers/graphql/index.js";
-import { analyzeRest } from "../src/analyzers/rest/index.js";
-import { capture, jsonReq, PRODUCTS, VISIBLE_PRODUCTS_TEXT } from "./helpers.js";
+import { analyzeGraphQL, graphqlOperations, isGraphQLRequest } from "../src/analyzers/graphql/index.js";
+import { site } from "./sites.js";
 
-const QUERY = `query ProductList($first: Int!, $after: String, $token: String) {
-  products(first: $first, after: $after) { edges { cursor node { id title price } } pageInfo { hasNextPage endCursor } }
-}`;
+const gql = (name: Parameters<typeof site>[0]) => analyzeGraphQL(buildContext(site(name)));
 
-const response = {
-  data: {
-    products: {
-      edges: PRODUCTS.map((p) => ({ cursor: `c${p.id}`, node: { __typename: "Product", ...p } })),
-      pageInfo: { hasNextPage: true, endCursor: "c12" },
-    },
-  },
-};
-
-const gqlRequest = jsonReq("https://shop.test/graphql", response, {
-  method: "POST",
-  postData: JSON.stringify({ operationName: "ProductList", query: QUERY, variables: { first: 12, after: null, token: "[REDACTED]" } }),
-});
-
-describe("GraphQL detection", () => {
-  it("detects operations from POST bodies", () => {
-    expect(isGraphQLRequest(gqlRequest)).toBe(true);
-    const [op] = analyzeGraphQL(buildContext(capture({ requests: [gqlRequest], renderedText: VISIBLE_PRODUCTS_TEXT })));
+describe("GraphQL detection (real sites)", () => {
+  it("HackerOne: detects the operation from its POST body, with query text", () => {
+    const [op] = gql("hackerone");
     expect(op).toMatchObject({
-      endpoint: "https://shop.test/graphql",
-      operationName: "ProductList",
+      endpoint: "https://hackerone.com/graphql",
+      method: "POST",
+      operationName: "HacktivitySearchQuery",
       operationType: "query",
-      entityType: "Product",
     });
-    expect(op?.variables).toMatchObject({ first: 12, after: null });
-    expect(op?.paginationFields).toEqual(
-      expect.arrayContaining(["variables.first", "variables.after", "data.products.pageInfo.endCursor"]),
-    );
-    expect(op?.assessment.recordSet?.path).toBe("data.products.edges[].node");
+    expect(op?.query).toMatch(/^\s*query HacktivitySearchQuery/);
+    expect(op?.assessment.recordSet).toMatchObject({ path: "data.search.nodes", count: 25 });
+    expect(op?.assessment.visibleOverlap).toBe(1);
+    expect(op?.paginationFields).toEqual(expect.arrayContaining(["variables.size", "variables.from"]));
     expect(op?.score).toBeGreaterThanOrEqual(80);
   });
 
-  it("is not double-counted as a REST endpoint", () => {
-    expect(analyzeRest(buildContext(capture({ requests: [gqlRequest] })))).toHaveLength(0);
+  it("HackerOne: Relay pageInfo shows up as pagination fields", () => {
+    const teams = gql("hackerone").find((o) => o.operationName === "GetTeamsQuery");
+    expect(teams?.paginationFields).toEqual(expect.arrayContaining(["data.teams.pageInfo.endCursor", "data.teams.pageInfo.hasNextPage"]));
   });
 
-  it("detects persisted GET queries and batched requests", () => {
-    const persisted = jsonReq(
-      `https://shop.test/api?operationName=Feed&variables=${encodeURIComponent('{"page":2}')}&extensions=${encodeURIComponent(
-        '{"persistedQuery":{"version":1,"sha256Hash":"abc123"}}',
-      )}`,
-      { data: { feed: PRODUCTS } },
-    );
-    const batched = jsonReq("https://shop.test/gql", [{ data: { a: 1 } }, { data: { feed: PRODUCTS } }], {
-      method: "POST",
-      postData: JSON.stringify([
-        { operationName: "A", query: "query A { a }" },
-        { operationName: "B", query: "query B { feed { id title } }" },
-      ]),
-    });
-    const ops = analyzeGraphQL(buildContext(capture({ requests: [persisted, batched], renderedText: VISIBLE_PRODUCTS_TEXT })));
-    const feed = ops.find((o) => o.operationName === "Feed");
-    expect(feed?.persistedQueryHash).toBe("abc123");
-    expect(feed?.reasons.join(" ")).toMatch(/persisted query/);
-    expect(ops.map((o) => o.operationName)).toEqual(expect.arrayContaining(["A", "B"]));
+  it("Coursera: the search operation carries the visible results", () => {
+    const [op] = gql("coursera");
+    expect(op).toMatchObject({ operationName: "Search", operationType: "query", endpoint: "https://www.coursera.org/graphql-gateway" });
+    expect(op?.assessment.recordSet?.path).toBe("data.SearchResult.search[].elements");
+    expect(op?.assessment.visibleOverlap).toBeGreaterThan(0.5);
   });
 
-  it("recognizes GraphQL by response shape on a /graphql path", () => {
-    const r = jsonReq("https://shop.test/graphql", { data: { viewer: null } });
-    expect(isGraphQLRequest(r)).toBe(true);
-    expect(isGraphQLRequest(jsonReq("https://shop.test/api/items", { data: [] }))).toBe(false);
+  it("Airbnb: detects persisted queries sent as GET parameters", () => {
+    const ops = gql("airbnb");
+    const suggestions = ops.find((o) => o.operationName === "AutoSuggestionsQuery");
+    expect(suggestions).toMatchObject({ method: "GET", query: undefined });
+    expect(suggestions?.persistedQueryHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(suggestions?.reasons).toContain("persisted query (hash may change between deploys)");
   });
 
-  it("marks mutations as poor data sources", () => {
-    const mutation = jsonReq("https://shop.test/graphql", { data: { addToCart: { id: 1, title: "x" } } }, {
-      method: "POST",
-      postData: JSON.stringify({ query: "mutation AddToCart($id: ID!) { addToCart(id: $id) { id } }", variables: { id: 1 } }),
-    });
-    const [op] = analyzeGraphQL(buildContext(capture({ requests: [mutation] })));
-    expect(op?.operationType).toBe("mutation");
-    expect(op?.operationName).toBe("AddToCart");
-    expect(op?.score).toBeLessThan(30);
+  it("Twitch: splits a batched request into its operations", () => {
+    const batch = site("twitch").requests.find((r) => r.url === "https://gql.twitch.tv/gql" && r.postData?.startsWith("["));
+    expect(batch).toBeDefined();
+    expect(isGraphQLRequest(batch!)).toBe(true);
+    expect(graphqlOperations(batch!).length).toBeGreaterThan(1);
+    const names = gql("twitch").map((o) => o.operationName);
+    expect(names).toEqual(expect.arrayContaining(["BrowsePage_AllDirectories", "SideNav"]));
+  });
+
+  it("Twitch: tracking mutations are scored as useless", () => {
+    const send = gql("twitch").find((o) => o.operationName === "SendEvents");
+    expect(send?.operationType).toBe("mutation");
+    expect(send?.score).toBeLessThan(30);
+  });
+
+  // Known gap: Twitch's edges carry an extra `trackingID` key, so edges[].node is
+  // not unwrapped and the operation loses its record fields (and its rank).
+  it.fails("Twitch: unwraps edges[].node even when edges carry extra keys", () => {
+    const browse = gql("twitch").find((o) => o.operationName === "BrowsePage_AllDirectories");
+    expect(browse?.assessment.recordSet?.path).toBe("data.directoriesWithTags.edges[].node");
+  });
+
+  it("finds no GraphQL on sites that don't use it", () => {
+    for (const name of ["books-toscrape", "quotes-scroll", "crates", "bbc-news"] as const) expect(gql(name)).toEqual([]);
   });
 });
