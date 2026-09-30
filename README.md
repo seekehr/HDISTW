@@ -2,6 +2,10 @@
 
 HowDoIScrapeThisWebsite. Point it at a URL and it tells you where the page gets its data (REST, GraphQL, Next.js, embedded JSON, plain HTML) and the cheapest way to scrape it.
 
+## Preview
+
+<img src="image preview/preview.png" alt="Preview">
+
 ## Setup
 
 Needs Node 20+ and Google Chrome installed.

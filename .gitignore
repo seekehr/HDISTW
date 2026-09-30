@@ -4,3 +4,8 @@ reports/
 .env
 *.log
 .hdistw-profile/
+.claude/
+.idea/
+.vscode/
+.cursor/
+spec.md
