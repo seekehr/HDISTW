@@ -69,7 +69,7 @@ const program = new Command()
 
 program
   .command("inspect")
-  .description("Load a URL in Chromium, analyze its network traffic and recommend an extraction strategy.")
+  .description("Load a URL in Chrome, analyze its network traffic and recommend an extraction strategy.")
   .argument("<url>", "page to inspect", parseUrl)
   .option("-o, --out <dir>", "report output directory", "reports")
   .option("--timeout <ms>", "navigation timeout", parseMs, 45_000)
@@ -83,7 +83,7 @@ program
     console.log(bold("HowDoIScrapeThisWebsite"), "\n");
     console.log(`Target: ${url}\n`);
 
-    const base = { url, profileDir: opts.profile, timeoutMs: opts.timeout, settleMs: opts.settle };
+    const base = { url, profileDir: opts.profile, channel: "chrome" as const, timeoutMs: opts.timeout, settleMs: opts.settle };
     let capture = opts.login ? undefined : await captureSite(base);
     const reason = opts.login ? "Logging in first (--login)." : capture && loginReason(capture);
 
@@ -92,8 +92,9 @@ program
         console.log(warn(reason));
         console.log("Opening a browser window. Log in or complete the check there, then come back here.");
         try {
+          console.log(dim("Reloading and capturing the page..."));
           capture = await captureSite({ ...base, login: { waitForUser: waitForEnter } });
-          console.log(ok("Captured the page with your browser session (saved for next time)"));
+          console.log(ok("Captured the page with your browser session (saved for next time).\n"));
         } catch (err) {
           console.log(warn((err as Error).message));
         }
@@ -118,9 +119,7 @@ program
 program.parseAsync().catch((err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
   if (/Executable doesn't exist|browserType\.launch/i.test(message)) {
-    console.error(fail("Chromium is not installed. Run: npx playwright install chromium"));
-  } else if (/ProcessSingleton|profile.*(in use|locked)|user data directory is already in use/i.test(message)) {
-    console.error(fail("The browser profile is in use by another hdistw run. Close it and try again."));
+    console.error(fail("Chrome is not installed or not found. Run: npx playwright install chrome"));
   } else {
     console.error(fail(message));
   }

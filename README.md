@@ -4,11 +4,11 @@ HowDoIScrapeThisWebsite. Point it at a URL and it tells you where the page gets 
 
 ## Setup
 
-Needs Node 20+.
+Needs Node 20+ and Google Chrome installed.
 
 ```
 npm install
-npx playwright install chromium
+npx playwright install chrome
 npm run build
 npm link
 ```
@@ -29,9 +29,9 @@ Other flags: `--no-ai`, `--out <dir>`, `--timeout <ms>`, `--model <name>`, `--pr
 
 ### Logins and bot checks
 
-It loads the page in a hidden browser first. If that hits a login page or a bot check (like Cloudflare's "Just a moment..."), a browser window opens. Log in or pass the check there, then press Enter in the terminal and it captures the page with your session.
+It uses your installed Chrome binary (not Playwright's Chromium), so Cloudflare and other bot checks see a real browser. It keeps its own profile at `~/.hdistw/profile`.
 
-Your login is saved in a browser profile (`~/.hdistw/profile` by default), so next time it usually works without the window. That folder holds your login cookies, so keep it private.
+It loads the page in a hidden Chrome first. If that hits a login page or a bot check, a Chrome window opens. Log in or pass the check there, then press Enter in the terminal and it captures the page with your session.
 
 Some pages load fine logged out but show more when you're logged in. Use `--login` to always log in first.
 

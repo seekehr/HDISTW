@@ -1,3 +1,7 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { existsSync } from "node:fs";
+import { createServer } from "node:net";
+import path from "node:path";
 import { chromium, type Browser, type BrowserContext, type Page, type Request } from "playwright";
 import type { Capture, CapturedRequest, CookieInfo, DomInfo } from "../schemas/capture.js";
 import { redactBody, redactHeaders, redactUrl } from "../utils/redact.js";
@@ -12,8 +16,10 @@ export interface CaptureOptions {
   timeoutMs: number;
   /** Extra quiet time after the load settles, to catch late fetches. */
   settleMs: number;
-  /** Persistent Chromium profile directory, so logins survive between runs. */
+  /** Persistent browser profile directory, so logins survive between runs. */
   profileDir?: string;
+  /** "chrome" to launch the real Chrome binary via CDP (no automation flags). Omit for Playwright's Chromium. */
+  channel?: string;
   /**
    * Open a visible window first so the user can log in or pass a bot check.
    * The page is then reloaded in that session and captured.
@@ -89,28 +95,130 @@ async function waitForLogin(context: BrowserContext, opts: CaptureOptions, login
   if (closed || context.pages().length === 0) throw new Error("The browser window was closed before the page was captured.");
 }
 
-/**
- * Loads a page in Chromium and records its data-relevant network traffic.
- * Listeners are attached before navigation so nothing from the load is missed.
- */
-export async function captureSite(opts: CaptureOptions): Promise<Capture> {
-  const headless = opts.login ? (opts.login.headless ?? false) : true;
-  const viewport = headless ? { width: 1366, height: 900 } : null;
-  let browser: Browser | undefined;
-  let context: BrowserContext;
-  if (opts.profileDir) {
-    context = await chromium.launchPersistentContext(opts.profileDir, { headless, viewport });
+// --- Chrome via CDP (no Playwright automation flags) ---
+
+function findChrome(): string {
+  const candidates: string[] = [];
+  if (process.platform === "win32") {
+    for (const env of ["PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"] as const) {
+      const base = process.env[env];
+      if (base) candidates.push(path.join(base, "Google", "Chrome", "Application", "chrome.exe"));
+    }
+  } else if (process.platform === "darwin") {
+    candidates.push("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
   } else {
-    browser = await chromium.launch({ headless });
-    context = await browser.newContext({ viewport });
+    candidates.push("/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser");
   }
+  for (const p of candidates) {
+    if (existsSync(p)) return p;
+  }
+  throw new Error("Chrome not found. Install Google Chrome.");
+}
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = createServer();
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address();
+      const port = typeof addr === "object" && addr ? addr.port : 0;
+      srv.close((err) => (err ? reject(err) : resolve(port)));
+    });
+  });
+}
+
+async function waitForCdp(port: number, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+      if (res.ok) return;
+    } catch { /* not ready yet */ }
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  throw new Error(`Chrome did not start within ${timeoutMs}ms.`);
+}
+
+interface ChromeHandle {
+  browser: Browser;
+  context: BrowserContext;
+  proc: ChildProcess;
+}
+
+async function launchChrome(opts: CaptureOptions): Promise<ChromeHandle> {
+  const exe = findChrome();
+  const port = await freePort();
+  const headless = opts.login ? (opts.login.headless ?? false) : true;
+
+  const args = [
+    `--remote-debugging-port=${port}`,
+    ...(opts.profileDir ? [`--user-data-dir=${opts.profileDir}`] : []),
+    ...(headless ? ["--headless=new"] : []),
+    "--no-first-run",
+    "--no-default-browser-check",
+    "about:blank",
+  ];
+
+  const proc = spawn(exe, args, { stdio: "pipe" });
+
+  // If Chrome exits immediately, surface the error.
+  const exitPromise = new Promise<never>((_, reject) => {
+    proc.on("exit", (code) => reject(new Error(`Chrome exited with code ${code}`)));
+  });
 
   try {
-    if (opts.login) await waitForLogin(context, opts, opts.login);
-    return await recordLoad(context, opts);
+    await Promise.race([waitForCdp(port, 15_000), exitPromise]);
+  } catch (err) {
+    proc.kill();
+    throw err;
+  }
+
+  const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
+  const context = browser.contexts()[0] ?? await browser.newContext();
+
+  return { browser, context, proc };
+}
+
+// --- Playwright Chromium (for tests and fallback) ---
+
+interface PlaywrightHandle {
+  browser?: Browser;
+  context: BrowserContext;
+}
+
+async function launchPlaywright(opts: CaptureOptions): Promise<PlaywrightHandle> {
+  const headless = opts.login ? (opts.login.headless ?? false) : true;
+  const viewport = headless ? { width: 1366, height: 900 } : null;
+  if (opts.profileDir) {
+    const context = await chromium.launchPersistentContext(opts.profileDir, { headless, viewport });
+    return { context };
+  }
+  const browser = await chromium.launch({ headless });
+  const context = await browser.newContext({ viewport });
+  return { browser, context };
+}
+
+// --- Public API ---
+
+export async function captureSite(opts: CaptureOptions): Promise<Capture> {
+  if (opts.channel === "chrome") {
+    const handle = await launchChrome(opts);
+    try {
+      if (opts.login) await waitForLogin(handle.context, opts, opts.login);
+      return await recordLoad(handle.context, opts);
+    } finally {
+      await handle.context.close().catch(() => undefined);
+      await handle.browser.close().catch(() => undefined);
+      handle.proc.kill();
+    }
+  }
+
+  const handle = await launchPlaywright(opts);
+  try {
+    if (opts.login) await waitForLogin(handle.context, opts, opts.login);
+    return await recordLoad(handle.context, opts);
   } finally {
-    await context.close().catch(() => undefined);
-    await browser?.close().catch(() => undefined);
+    await handle.context.close().catch(() => undefined);
+    await handle.browser?.close().catch(() => undefined);
   }
 }
 
