@@ -13,8 +13,8 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/cli/index.ts",
+    "build": "node init && tsc -p tsconfig.json",
+    "dev": "node init && tsx src/cli/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -24,6 +24,8 @@
   "dependencies": {
     "@google/genai": "^2.24.0",
     "commander": "^15.0.0",
+    "dotenv": "^8.2.0",
+    "node-fetch": "^3.3.2",
     "playwright": "^1.63.0",
     "zod": "^4.6.5"
   },
