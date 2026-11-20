@@ -1,11 +1,10 @@
 node_modules/
 dist/
 reports/
-.env
 *.log
 .hdistw-profile/
 .claude/
 .idea/
-.vscode/
 .cursor/
 spec.md
+config.bat
